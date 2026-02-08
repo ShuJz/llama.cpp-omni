@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Omni Server Monitor</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #c5c5c5;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        header {
+            background-color: #252526;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #333;
+        }
+        h1 { margin: 0; font-size: 1.2rem; color: #fff; }
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            background-color: #555;
+            color: #fff;
+        }
+        .status-badge.connected { background-color: #4caf50; }
+        .status-badge.disconnected { background-color: #f44336; }
+        
+        main {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            flex-direction: row;
+        }
+        .left-col {
+            width: 400px;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #333;
+            min-width: 300px;
+        }
+        .right-col {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .video-panel {
+            height: 300px;
+            border-bottom: 1px solid #333;
+        }
+        #videoFrame {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #111;
+            border-radius: 4px;
+        }
+        
+        .panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            min-height: 0;
+        }
+        .panel-header {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #61afef;
+            text-transform: uppercase;
+            font-size: 0.9rem;
+            border-bottom: 1px solid #333;
+            padding-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .log-container {
+            flex: 1;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9rem;
+            white-space: pre-wrap;
+        }
+        .log-entry {
+            margin-bottom: 4px;
+            padding: 2px 0;
+            border-bottom: 1px solid #2a2a2a;
+        }
+        .log-time { color: #888; margin-right: 8px; }
+        .log-type-INFO { color: #98c379; }
+        .log-type-ERROR { color: #e06c75; }
+        .log-type-WARNING { color: #e5c07b; }
+        .log-type-LLM { color: #c678dd; } /* Purple for LLM */
+        .log-type-AUDIO { color: #61afef; } /* Blue for Audio */
+
+        /* Chat/LLM specific styles */
+        .chat-entry {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 6px;
+            background-color: #2d2d2d;
+        }
+        .chat-role {
+            font-weight: bold;
+            margin-bottom: 5px;
+            font-size: 0.8rem;
+        }
+        .chat-role.user { color: #61afef; }
+        .chat-role.assistant { color: #98c379; }
+        .chat-content { line-height: 1.5; }
+        
+        .server-state {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+            padding: 10px;
+            background: #252526;
+            border-radius: 4px;
+        }
+        .state-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: #555;
+        }
+        .state-indicator.active { background-color: #4caf50; box-shadow: 0 0 5px #4caf50; }
+        .state-indicator.processing { background-color: #e5c07b; animation: pulse 1s infinite; }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        #audioVisualizer {
+            width: 100%;
+            height: 100px;
+            background-color: #252526;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        
+        .vad-status {
+            font-size: 0.8rem;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background-color: #333;
+            color: #aaa;
+        }
+        .vad-status.speaking {
+            background-color: #e5c07b;
+            color: #1e1e1e;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Omni Server Monitor</h1>
+        <div id="connectionStatus" class="status-badge disconnected">Disconnected</div>
+    </header>
+    
+    <div style="padding: 0 10px;">
+        <div class="server-state">
+            <div id="serverStateIndicator" class="state-indicator"></div>
+            <span id="serverStateText">Idle</span>
+        </div>
+    </div>
+
+    <main>
+        <div class="left-col">
+            <div class="panel" style="flex: 2;">
+                <div class="panel-header">System Logs & Events</div>
+                <div id="systemLogs" class="log-container"></div>
+            </div>
+            <div class="panel" style="flex: 1; border-top: 1px solid #333;">
+                <div class="panel-header">
+                    <span>Audio Signal</span>
+                    <span id="vadStatus" class="vad-status">Silence</span>
+                </div>
+                <canvas id="audioVisualizer"></canvas>
+            </div>
+        </div>
+        <div class="right-col">
+            <div class="panel video-panel">
+                <div class="panel-header">Video</div>
+                <img id="videoFrame" alt="No video" />
+            </div>
+            <div class="panel">
+                <div class="panel-header">LLM Interaction</div>
+                <div id="llmLogs" class="log-container"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+        let socket;
+        let retryInterval = 1000;
+        let currentLlmMessage = null;
+        
+        // Visualizer variables
+        const canvas = document.getElementById('audioVisualizer');
+        const ctx = canvas.getContext('2d');
+        let audioData = new Array(100).fill(0); // Store last 100 audio levels
+        let animationId;
+
+        function resizeCanvas() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight - 20; // minus padding
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function drawVisualizer() {
+            ctx.fillStyle = '#252526';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const barWidth = canvas.width / audioData.length;
+            
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height);
+            
+            for (let i = 0; i < audioData.length; i++) {
+                const height = audioData[i] * canvas.height;
+                const x = i * barWidth;
+                const y = canvas.height - height;
+                
+                // Draw bar
+                const hue = 120 + (1 - audioData[i]) * 120; // Green to Red (reversed) -> actually Green(120) to Blue(240)? No. 
+                // Let's do simple Green color
+                ctx.fillStyle = `rgba(97, 175, 239, ${0.5 + audioData[i]})`; // Blue-ish
+                ctx.fillRect(x, y, barWidth - 1, height);
+            }
+            
+            animationId = requestAnimationFrame(drawVisualizer);
+        }
+        drawVisualizer();
+
+        function connect() {
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = () => {
+                document.getElementById('connectionStatus').textContent = 'Connected';
+                document.getElementById('connectionStatus').classList.remove('disconnected');
+                document.getElementById('connectionStatus').classList.add('connected');
+                addLog('INFO', 'Connected to server monitor');
+                retryInterval = 1000;
+            };
+
+            socket.onclose = () => {
+                document.getElementById('connectionStatus').textContent = 'Disconnected';
+                document.getElementById('connectionStatus').classList.remove('connected');
+                document.getElementById('connectionStatus').classList.add('disconnected');
+                addLog('WARNING', 'Disconnected. Retrying in ' + retryInterval/1000 + 's...');
+                setTimeout(connect, retryInterval);
+                retryInterval = Math.min(retryInterval * 2, 10000);
+            };
+
+            socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleMessage(data);
+                } catch (e) {
+                    console.error('Invalid JSON:', event.data);
+                }
+            };
+        }
+
+        function handleMessage(data) {
+            // data structure: { type: 'log'|'state'|'llm_token'|'llm_start'|'llm_end'|'audio_level'|'vad', ... }
+            
+            if (data.type === 'log') {
+                addLog(data.level || 'INFO', data.content);
+            } else if (data.type === 'state') {
+                updateServerState(data.content);
+            } else if (data.type === 'llm_start') {
+                startLlmMessage();
+            } else if (data.type === 'llm_token') {
+                appendLlmToken(data.content);
+            } else if (data.type === 'llm_end') {
+                endLlmMessage();
+            } else if (data.type === 'audio_level') {
+                updateAudioLevel(data.content);
+            } else if (data.type === 'vad') {
+                updateVadStatus(data.status);
+            } else if (data.type === 'video_frame') {
+                const img = document.getElementById('videoFrame');
+                img.src = data.content;
+            }
+        }
+
+        function updateAudioLevel(level) {
+            audioData.push(level);
+            audioData.shift();
+        }
+
+        function updateVadStatus(status) {
+            const el = document.getElementById('vadStatus');
+            if (status === 'speaking') {
+                el.textContent = 'Speaking';
+                el.classList.add('speaking');
+            } else {
+                el.textContent = 'Silence';
+                el.classList.remove('speaking');
+            }
+        }
+
+        function addLog(level, message) {
+            const container = document.getElementById('systemLogs');
+            const div = document.createElement('div');
+            div.className = 'log-entry';
+            
+            const time = new Date().toLocaleTimeString();
+            div.innerHTML = `<span class="log-time">[${time}]</span><span class="log-type-${level}">[${level}]</span> ${message}`;
+            
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function updateServerState(state) {
+            const indicator = document.getElementById('serverStateIndicator');
+            const text = document.getElementById('serverStateText');
+            
+            text.textContent = state;
+            indicator.className = 'state-indicator'; // reset
+            
+            if (state === 'Processing' || state === 'Generating') {
+                indicator.classList.add('processing');
+            } else if (state === 'Idle') {
+                 // default grey
+            } else {
+                indicator.classList.add('active');
+            }
+        }
+
+        function startLlmMessage() {
+            const container = document.getElementById('llmLogs');
+            currentLlmMessage = document.createElement('div');
+            currentLlmMessage.className = 'chat-entry';
+            
+            const role = document.createElement('div');
+            role.className = 'chat-role assistant';
+            role.textContent = 'Assistant';
+            
+            const content = document.createElement('div');
+            content.className = 'chat-content';
+            
+            currentLlmMessage.appendChild(role);
+            currentLlmMessage.appendChild(content);
+            container.appendChild(currentLlmMessage);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function appendLlmToken(token) {
+            if (!currentLlmMessage) startLlmMessage();
+            const content = currentLlmMessage.querySelector('.chat-content');
+            content.textContent += token;
+            // Auto-scroll
+            const container = document.getElementById('llmLogs');
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function endLlmMessage() {
+            currentLlmMessage = null;
+        }
+
+        connect();
+    </script>
+</body>
+</html>
